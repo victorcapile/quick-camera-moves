@@ -131,19 +131,19 @@ class QCM_Properties(bpy.types.PropertyGroup):
     )
 
     zoom_fov_start: FloatProperty(
-        name="FOV Inicial",
-        description="Campo de visão inicial",
+        name="Lens Inicial (mm)",
+        description="Distância focal inicial",
         default=50.0,
         min=1.0,
-        max=180.0
+        max=500.0
     )
 
     zoom_fov_end: FloatProperty(
-        name="FOV Final",
-        description="Campo de visão final",
-        default=20.0,
+        name="Lens Final (mm)",
+        description="Distância focal final",
+        default=100.0,
         min=1.0,
-        max=180.0
+        max=500.0
     )
 
 
@@ -401,7 +401,7 @@ class QCM_OT_create_move(bpy.types.Operator):
 
         context.scene.frame_set(start_frame)
         camera.keyframe_insert(data_path="location", frame=start_frame)
-        cam_data.keyframe_insert(data_path="angle", frame=start_frame)
+        cam_data.keyframe_insert(data_path="lens", frame=start_frame)
 
         steps = 12
         for i in range(1, steps + 1):
@@ -413,14 +413,21 @@ class QCM_OT_create_move(bpy.types.Operator):
 
             new_fov = 2 * math.atan(apparent_size / new_distance)
             new_fov = max(0.01, min(math.pi - 0.01, new_fov))
+            new_lens = cam_data.sensor_width / (2 * math.tan(new_fov / 2))
 
             camera.location = new_pos
-            cam_data.angle = new_fov
+            cam_data.lens = new_lens
 
             camera.keyframe_insert(data_path="location", frame=frame)
-            cam_data.keyframe_insert(data_path="angle", frame=frame)
+            cam_data.keyframe_insert(data_path="lens", frame=frame)
 
         context.scene.frame_set(start_frame)
+
+        target_obj = props.target_object
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
+            add_track_constraint(camera, target_loc=target_loc)
 
     def create_arc_shot(self, context, camera, target_obj, target_loc, start_frame, end_frame, props):
         offset = camera.location - target_loc
@@ -482,6 +489,12 @@ class QCM_OT_create_move(bpy.types.Operator):
         camera.keyframe_insert(data_path="location", frame=end_frame)
         camera.keyframe_insert(data_path="rotation_euler", frame=end_frame)
 
+        target_obj = props.target_object
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
+            add_track_constraint(camera, target_loc=target_loc)
+
     def create_turntable(self, context, camera, target_obj, target_loc, start_frame, end_frame, props):
         offset = camera.location - target_loc
         radius = Vector((offset.x, offset.y, 0)).length
@@ -519,21 +532,34 @@ class QCM_OT_create_move(bpy.types.Operator):
         camera.location += direction * props.move_distance
         camera.keyframe_insert(data_path="location", frame=end_frame)
 
+        target_obj = props.target_object
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
+            target_loc = get_target_location(context)
+            add_track_constraint(camera, target_loc=target_loc)
+
     def create_zoom(self, context, camera, start_frame, end_frame, props):
         cam_data = camera.data
 
-        fov_start = math.radians(props.zoom_fov_start)
-        fov_end = math.radians(props.zoom_fov_end)
+        lens_start = props.zoom_fov_start
+        lens_end = props.zoom_fov_end
 
         if props.move_type == 'ZOOM_OUT':
-            fov_start, fov_end = fov_end, fov_start
+            lens_start, lens_end = lens_end, lens_start
 
         context.scene.frame_set(start_frame)
-        cam_data.angle = fov_start
-        cam_data.keyframe_insert(data_path="angle", frame=start_frame)
+        cam_data.lens = lens_start
+        cam_data.keyframe_insert(data_path="lens", frame=start_frame)
 
-        cam_data.angle = fov_end
-        cam_data.keyframe_insert(data_path="angle", frame=end_frame)
+        cam_data.lens = lens_end
+        cam_data.keyframe_insert(data_path="lens", frame=end_frame)
+
+        target_obj = props.target_object
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
+            add_track_constraint(camera, target_loc=get_target_location(context))
 
     def create_shake(self, context, camera, start_frame, end_frame, props):
         initial_loc = camera.location.copy()
@@ -618,8 +644,6 @@ class QCM_OT_clear_animation(bpy.types.Operator):
 
         for c in list(camera.constraints):
             if c.name.startswith("QCM_"):
-                if c.type == 'FOLLOW_PATH' and c.animation_data:
-                    c.animation_data_clear()
                 camera.constraints.remove(c)
 
         remove_qcm_objects()
