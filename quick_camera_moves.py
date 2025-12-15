@@ -21,10 +21,6 @@ from bpy.props import (
 )
 
 
-# ============================================================
-# PROPRIEDADES
-# ============================================================
-
 class QCM_Properties(bpy.types.PropertyGroup):
 
     move_type: EnumProperty(
@@ -98,7 +94,6 @@ class QCM_Properties(bpy.types.PropertyGroup):
         default=True
     )
 
-    # Dolly Zoom
     dolly_zoom_intensity: FloatProperty(
         name="Intensidade",
         description="Intensidade do efeito Vertigo",
@@ -107,7 +102,6 @@ class QCM_Properties(bpy.types.PropertyGroup):
         max=3.0
     )
 
-    # Shake
     shake_intensity: FloatProperty(
         name="Intensidade",
         description="Intensidade da tremida",
@@ -124,7 +118,6 @@ class QCM_Properties(bpy.types.PropertyGroup):
         max=10.0
     )
 
-    # Arc Shot
     arc_height: FloatProperty(
         name="Altura do Arco",
         description="Variação de altura durante o arco",
@@ -134,7 +127,6 @@ class QCM_Properties(bpy.types.PropertyGroup):
         unit='LENGTH'
     )
 
-    # Tilt
     tilt_angle: FloatProperty(
         name="Ângulo Tilt",
         description="Ângulo de inclinação vertical",
@@ -144,7 +136,6 @@ class QCM_Properties(bpy.types.PropertyGroup):
         subtype='ANGLE'
     )
 
-    # Zoom
     zoom_fov_start: FloatProperty(
         name="FOV Inicial",
         description="Campo de visão inicial",
@@ -161,7 +152,6 @@ class QCM_Properties(bpy.types.PropertyGroup):
         max=180.0
     )
 
-    # Rack Focus
     rack_focus_start: FloatProperty(
         name="Foco Inicial",
         description="Distância focal inicial",
@@ -180,10 +170,6 @@ class QCM_Properties(bpy.types.PropertyGroup):
         unit='LENGTH'
     )
 
-
-# ============================================================
-# FUNÇÕES AUXILIARES
-# ============================================================
 
 def get_active_camera(context):
     if context.scene.camera:
@@ -254,10 +240,6 @@ def remove_qcm_objects():
             bpy.data.objects.remove(obj, do_unlink=True)
 
 
-# ============================================================
-# OPERADOR PRINCIPAL
-# ============================================================
-
 class QCM_OT_create_move(bpy.types.Operator):
     bl_idname = "qcm.create_move"
     bl_label = "Criar Movimento"
@@ -275,7 +257,6 @@ class QCM_OT_create_move(bpy.types.Operator):
             self.report({'WARNING'}, "Selecione um tipo de movimento")
             return {'CANCELLED'}
 
-        # Calcula frames
         fps = context.scene.render.fps
         start_frame = context.scene.frame_current
         end_frame = start_frame + int(props.duration * fps)
@@ -287,7 +268,6 @@ class QCM_OT_create_move(bpy.types.Operator):
 
         move_type = props.move_type
 
-        # Básicos
         if move_type == 'ORBIT':
             self.create_orbit(context, camera, target_loc, start_frame, end_frame, props)
         elif move_type in ('DOLLY_IN', 'DOLLY_OUT'):
@@ -296,8 +276,6 @@ class QCM_OT_create_move(bpy.types.Operator):
             self.create_truck(context, camera, target_loc, start_frame, end_frame, props)
         elif move_type in ('PEDESTAL_UP', 'PEDESTAL_DOWN'):
             self.create_pedestal(context, camera, target_loc, start_frame, end_frame, props)
-
-        # Cinematográficos
         elif move_type == 'CRANE':
             self.create_crane(context, camera, target_loc, start_frame, end_frame, props)
         elif move_type == 'DOLLY_ZOOM':
@@ -308,16 +286,12 @@ class QCM_OT_create_move(bpy.types.Operator):
             self.create_whip_pan(context, camera, target_loc, start_frame, end_frame, props)
         elif move_type == 'PUSH_TILT':
             self.create_push_tilt(context, camera, target_loc, start_frame, end_frame, props)
-
-        # Produto/Archviz
         elif move_type == 'TURNTABLE':
             self.create_turntable(context, camera, target_loc, start_frame, end_frame, props)
         elif move_type == 'FLYTHROUGH':
             self.create_flythrough(context, camera, target_loc, start_frame, end_frame, props)
         elif move_type in ('ZOOM_IN', 'ZOOM_OUT'):
             self.create_zoom(context, camera, start_frame, end_frame, props)
-
-        # Efeitos
         elif move_type == 'SHAKE':
             self.create_shake(context, camera, start_frame, end_frame, props)
         elif move_type == 'FOLLOW_PATH':
@@ -333,10 +307,6 @@ class QCM_OT_create_move(bpy.types.Operator):
 
         self.report({'INFO'}, f"Movimento '{move_type}' criado: frames {start_frame}-{end_frame}")
         return {'FINISHED'}
-
-    # --------------------------------------------------------
-    # MOVIMENTOS BÁSICOS
-    # --------------------------------------------------------
 
     def create_orbit(self, context, camera, target_loc, start_frame, end_frame, props):
         offset = camera.location - target_loc
@@ -411,10 +381,6 @@ class QCM_OT_create_move(bpy.types.Operator):
         if props.keep_target_focus:
             add_track_constraint(camera, target_loc=target_loc)
 
-    # --------------------------------------------------------
-    # MOVIMENTOS CINEMATOGRÁFICOS
-    # --------------------------------------------------------
-
     def create_crane(self, context, camera, target_loc, start_frame, end_frame, props):
         offset = camera.location - target_loc
         radius = offset.length
@@ -443,12 +409,13 @@ class QCM_OT_create_move(bpy.types.Operator):
             add_track_constraint(camera, target_loc=target_loc)
 
     def create_dolly_zoom(self, context, camera, target_loc, start_frame, end_frame, props):
+        """Efeito Vertigo: move câmera enquanto ajusta FOV pra manter tamanho aparente do subject"""
         cam_data = camera.data
 
         initial_distance = (camera.location - target_loc).length
         initial_fov = cam_data.angle
 
-        # size = distance * tan(fov/2), então: d1 * tan(fov1/2) = d2 * tan(fov2/2)
+        # size = distance * tan(fov/2)
         apparent_size = initial_distance * math.tan(initial_fov / 2)
 
         direction = (target_loc - camera.location).normalized()
@@ -467,7 +434,7 @@ class QCM_OT_create_move(bpy.types.Operator):
             new_distance = (new_pos - target_loc).length
 
             new_fov = 2 * math.atan(apparent_size / new_distance)
-            new_fov = max(0.01, min(math.pi - 0.01, new_fov))  # Clamp
+            new_fov = max(0.01, min(math.pi - 0.01, new_fov))
 
             camera.location = new_pos
             cam_data.angle = new_fov
@@ -509,7 +476,6 @@ class QCM_OT_create_move(bpy.types.Operator):
             add_track_constraint(camera, target_loc=target_loc)
 
     def create_whip_pan(self, context, camera, target_loc, start_frame, end_frame, props):
-        """Cria rotação rápida horizontal (whip pan)"""
         initial_rotation = camera.rotation_euler.copy()
 
         context.scene.frame_set(start_frame)
@@ -534,15 +500,10 @@ class QCM_OT_create_move(bpy.types.Operator):
         camera.keyframe_insert(data_path="rotation_euler", frame=start_frame)
 
         camera.location += direction * props.move_distance
-
         camera.rotation_euler.x += math.radians(props.tilt_angle)
 
         camera.keyframe_insert(data_path="location", frame=end_frame)
         camera.keyframe_insert(data_path="rotation_euler", frame=end_frame)
-
-    # --------------------------------------------------------
-    # PRODUTO / ARCHVIZ
-    # --------------------------------------------------------
 
     def create_turntable(self, context, camera, target_loc, start_frame, end_frame, props):
         offset = camera.location - target_loc
@@ -553,7 +514,7 @@ class QCM_OT_create_move(bpy.types.Operator):
         context.scene.frame_set(start_frame)
         camera.keyframe_insert(data_path="location", frame=start_frame)
 
-        steps = 24  # Mais steps pra movimento suave
+        steps = 24
 
         for i in range(1, steps + 1):
             progress = i / steps
@@ -595,17 +556,11 @@ class QCM_OT_create_move(bpy.types.Operator):
         cam_data.angle = fov_end
         cam_data.keyframe_insert(data_path="angle", frame=end_frame)
 
-    # --------------------------------------------------------
-    # EFEITOS
-    # --------------------------------------------------------
-
     def create_shake(self, context, camera, start_frame, end_frame, props):
-        """Cria efeito de câmera tremendo (handheld)"""
         initial_loc = camera.location.copy()
         initial_rot = camera.rotation_euler.copy()
 
         fps = context.scene.render.fps
-        total_frames = end_frame - start_frame
 
         intensity = props.shake_intensity * 0.1
         rot_intensity = props.shake_intensity * 0.02
@@ -661,12 +616,11 @@ class QCM_OT_create_move(bpy.types.Operator):
         constraint.offset = 0
         constraint.keyframe_insert(data_path="offset", frame=start_frame)
 
-        constraint.offset = -100  # Percorre toda a curva
+        constraint.offset = -100
         constraint.keyframe_insert(data_path="offset", frame=end_frame)
 
     def create_rack_focus(self, context, camera, start_frame, end_frame, props):
         cam_data = camera.data
-
         cam_data.dof.use_dof = True
 
         context.scene.frame_set(start_frame)
@@ -676,10 +630,6 @@ class QCM_OT_create_move(bpy.types.Operator):
         cam_data.dof.focus_distance = props.rack_focus_end
         cam_data.dof.keyframe_insert(data_path="focus_distance", frame=end_frame)
 
-
-# ============================================================
-# OPERADORES AUXILIARES
-# ============================================================
 
 class QCM_OT_clear_animation(bpy.types.Operator):
     bl_idname = "qcm.clear_animation"
@@ -697,9 +647,6 @@ class QCM_OT_clear_animation(bpy.types.Operator):
 
         if camera.data.animation_data:
             camera.data.animation_data_clear()
-
-        if camera.data.dof.animation_data:
-            camera.data.dof.animation_data_clear()
 
         for c in camera.constraints:
             if c.name.startswith("QCM_"):
@@ -719,10 +666,6 @@ class QCM_OT_preview(bpy.types.Operator):
         bpy.ops.screen.animation_play()
         return {'FINISHED'}
 
-
-# ============================================================
-# PAINEL UI
-# ============================================================
 
 class QCM_PT_main_panel(bpy.types.Panel):
     bl_label = "Quick Camera Moves"
@@ -804,10 +747,6 @@ class QCM_PT_main_panel(bpy.types.Panel):
         row.operator("qcm.preview", icon='PREVIEW_RANGE')
         row.operator("qcm.clear_animation", icon='X')
 
-
-# ============================================================
-# REGISTRO
-# ============================================================
 
 classes = (
     QCM_Properties,
