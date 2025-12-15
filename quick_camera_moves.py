@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Quick Camera Moves",
     "author": "Victor",
-    "version": (2, 0, 0),
+    "version": (2, 1, 0),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Camera Moves",
     "description": "Cria movimentos cinematográficos de câmera com poucos cliques",
@@ -23,12 +23,16 @@ from bpy.props import (
 
 class QCM_Properties(bpy.types.PropertyGroup):
 
+    target_object: PointerProperty(
+        name="Target",
+        description="Objeto que a câmera vai seguir",
+        type=bpy.types.Object
+    )
+
     move_type: EnumProperty(
         name="Movimento",
         description="Tipo de movimento da câmera",
         items=[
-            ('NONE', "— Selecione —", ""),
-            ('HEADER_BASIC', "── Básicos ──", ""),
             ('ORBIT', "Orbit", "Gira ao redor do target"),
             ('DOLLY_IN', "Dolly In", "Aproxima do target"),
             ('DOLLY_OUT', "Dolly Out", "Afasta do target"),
@@ -36,23 +40,19 @@ class QCM_Properties(bpy.types.PropertyGroup):
             ('TRUCK_RIGHT', "Truck Right", "Move para direita"),
             ('PEDESTAL_UP', "Pedestal Up", "Sobe a câmera"),
             ('PEDESTAL_DOWN', "Pedestal Down", "Desce a câmera"),
-            ('HEADER_CINE', "── Cinematográficos ──", ""),
             ('CRANE', "Crane Shot", "Arco de cima para baixo"),
             ('DOLLY_ZOOM', "Dolly Zoom (Vertigo)", "Efeito Hitchcock - fundo distorce"),
             ('ARC_SHOT', "Arc Shot", "Arco 3D ao redor do target"),
             ('WHIP_PAN', "Whip Pan", "Rotação rápida horizontal"),
             ('PUSH_TILT', "Push In + Tilt", "Aproxima com rotação"),
-            ('HEADER_PRODUCT', "── Produto/Archviz ──", ""),
             ('TURNTABLE', "Turntable", "Rotação 360° perfeita"),
             ('FLYTHROUGH', "Flythrough", "Atravessa a cena em linha reta"),
             ('ZOOM_IN', "Zoom In", "Aumenta FOV sem mover"),
             ('ZOOM_OUT', "Zoom Out", "Diminui FOV sem mover"),
-            ('HEADER_EXTRA', "── Efeitos ──", ""),
             ('SHAKE', "Camera Shake", "Tremida de câmera na mão"),
             ('FOLLOW_PATH', "Follow Path", "Segue curva existente"),
-            ('RACK_FOCUS', "Rack Focus Setup", "Prepara mudança de foco"),
         ],
-        default='NONE'
+        default='ORBIT'
     )
 
     duration: FloatProperty(
@@ -85,12 +85,6 @@ class QCM_Properties(bpy.types.PropertyGroup):
     use_easing: BoolProperty(
         name="Easing Suave",
         description="Aplica ease in/out na animação",
-        default=True
-    )
-
-    keep_target_focus: BoolProperty(
-        name="Manter Foco no Target",
-        description="Câmera sempre olha para o target",
         default=True
     )
 
@@ -152,24 +146,6 @@ class QCM_Properties(bpy.types.PropertyGroup):
         max=180.0
     )
 
-    rack_focus_start: FloatProperty(
-        name="Foco Inicial",
-        description="Distância focal inicial",
-        default=2.0,
-        min=0.1,
-        max=100.0,
-        unit='LENGTH'
-    )
-
-    rack_focus_end: FloatProperty(
-        name="Foco Final",
-        description="Distância focal final",
-        default=10.0,
-        min=0.1,
-        max=100.0,
-        unit='LENGTH'
-    )
-
 
 def get_active_camera(context):
     if context.scene.camera:
@@ -178,8 +154,9 @@ def get_active_camera(context):
 
 
 def get_target_location(context):
-    if context.active_object and context.active_object.type != 'CAMERA':
-        return context.active_object.location.copy()
+    props = context.scene.qcm_props
+    if props.target_object:
+        return props.target_object.location.copy()
     return context.scene.cursor.location.copy()
 
 
@@ -208,7 +185,7 @@ def set_keyframe_interpolation_camera_data(camera, easing=True):
 
 
 def add_track_constraint(camera, target_obj=None, target_loc=None):
-    for c in camera.constraints:
+    for c in list(camera.constraints):
         if c.name == "QCM_Track":
             camera.constraints.remove(c)
 
@@ -235,7 +212,7 @@ def add_track_constraint(camera, target_obj=None, target_loc=None):
 
 
 def remove_qcm_objects():
-    for obj in bpy.data.objects:
+    for obj in list(bpy.data.objects):
         if obj.name.startswith("QCM_"):
             bpy.data.objects.remove(obj, do_unlink=True)
 
@@ -253,51 +230,43 @@ class QCM_OT_create_move(bpy.types.Operator):
             self.report({'ERROR'}, "Nenhuma câmera ativa na cena")
             return {'CANCELLED'}
 
-        if props.move_type in ('NONE', 'HEADER_BASIC', 'HEADER_CINE', 'HEADER_PRODUCT', 'HEADER_EXTRA'):
-            self.report({'WARNING'}, "Selecione um tipo de movimento")
-            return {'CANCELLED'}
-
         fps = context.scene.render.fps
         start_frame = context.scene.frame_current
         end_frame = start_frame + int(props.duration * fps)
 
-        target_obj = None
-        if context.active_object and context.active_object != camera:
-            target_obj = context.active_object
+        target_obj = props.target_object
         target_loc = get_target_location(context)
 
         move_type = props.move_type
 
         if move_type == 'ORBIT':
-            self.create_orbit(context, camera, target_loc, start_frame, end_frame, props)
+            self.create_orbit(context, camera, target_obj, target_loc, start_frame, end_frame, props)
         elif move_type in ('DOLLY_IN', 'DOLLY_OUT'):
-            self.create_dolly(context, camera, target_loc, start_frame, end_frame, props)
+            self.create_dolly(context, camera, target_obj, target_loc, start_frame, end_frame, props)
         elif move_type in ('TRUCK_LEFT', 'TRUCK_RIGHT'):
-            self.create_truck(context, camera, target_loc, start_frame, end_frame, props)
+            self.create_truck(context, camera, target_obj, target_loc, start_frame, end_frame, props)
         elif move_type in ('PEDESTAL_UP', 'PEDESTAL_DOWN'):
-            self.create_pedestal(context, camera, target_loc, start_frame, end_frame, props)
+            self.create_pedestal(context, camera, target_obj, target_loc, start_frame, end_frame, props)
         elif move_type == 'CRANE':
-            self.create_crane(context, camera, target_loc, start_frame, end_frame, props)
+            self.create_crane(context, camera, target_obj, target_loc, start_frame, end_frame, props)
         elif move_type == 'DOLLY_ZOOM':
             self.create_dolly_zoom(context, camera, target_loc, start_frame, end_frame, props)
         elif move_type == 'ARC_SHOT':
-            self.create_arc_shot(context, camera, target_loc, start_frame, end_frame, props)
+            self.create_arc_shot(context, camera, target_obj, target_loc, start_frame, end_frame, props)
         elif move_type == 'WHIP_PAN':
-            self.create_whip_pan(context, camera, target_loc, start_frame, end_frame, props)
+            self.create_whip_pan(context, camera, start_frame, end_frame, props)
         elif move_type == 'PUSH_TILT':
             self.create_push_tilt(context, camera, target_loc, start_frame, end_frame, props)
         elif move_type == 'TURNTABLE':
-            self.create_turntable(context, camera, target_loc, start_frame, end_frame, props)
+            self.create_turntable(context, camera, target_obj, target_loc, start_frame, end_frame, props)
         elif move_type == 'FLYTHROUGH':
-            self.create_flythrough(context, camera, target_loc, start_frame, end_frame, props)
+            self.create_flythrough(context, camera, start_frame, end_frame, props)
         elif move_type in ('ZOOM_IN', 'ZOOM_OUT'):
             self.create_zoom(context, camera, start_frame, end_frame, props)
         elif move_type == 'SHAKE':
             self.create_shake(context, camera, start_frame, end_frame, props)
         elif move_type == 'FOLLOW_PATH':
             self.create_follow_path(context, camera, start_frame, end_frame, props)
-        elif move_type == 'RACK_FOCUS':
-            self.create_rack_focus(context, camera, start_frame, end_frame, props)
 
         if move_type != 'SHAKE':
             set_keyframe_interpolation(camera, props.use_easing)
@@ -308,7 +277,7 @@ class QCM_OT_create_move(bpy.types.Operator):
         self.report({'INFO'}, f"Movimento '{move_type}' criado: frames {start_frame}-{end_frame}")
         return {'FINISHED'}
 
-    def create_orbit(self, context, camera, target_loc, start_frame, end_frame, props):
+    def create_orbit(self, context, camera, target_obj, target_loc, start_frame, end_frame, props):
         offset = camera.location - target_loc
         radius = offset.length
         start_angle = math.atan2(offset.y, offset.x)
@@ -331,10 +300,12 @@ class QCM_OT_create_move(bpy.types.Operator):
             camera.location.y = new_y
             camera.keyframe_insert(data_path="location", frame=frame)
 
-        if props.keep_target_focus:
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
             add_track_constraint(camera, target_loc=target_loc)
 
-    def create_dolly(self, context, camera, target_loc, start_frame, end_frame, props):
+    def create_dolly(self, context, camera, target_obj, target_loc, start_frame, end_frame, props):
         direction = (target_loc - camera.location).normalized()
 
         if props.move_type == 'DOLLY_OUT':
@@ -346,10 +317,12 @@ class QCM_OT_create_move(bpy.types.Operator):
         camera.location += direction * props.move_distance
         camera.keyframe_insert(data_path="location", frame=end_frame)
 
-        if props.keep_target_focus:
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
             add_track_constraint(camera, target_loc=target_loc)
 
-    def create_truck(self, context, camera, target_loc, start_frame, end_frame, props):
+    def create_truck(self, context, camera, target_obj, target_loc, start_frame, end_frame, props):
         forward = (target_loc - camera.location).normalized()
         up = Vector((0, 0, 1))
         right = forward.cross(up).normalized()
@@ -363,10 +336,12 @@ class QCM_OT_create_move(bpy.types.Operator):
         camera.location += right * props.move_distance
         camera.keyframe_insert(data_path="location", frame=end_frame)
 
-        if props.keep_target_focus:
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
             add_track_constraint(camera, target_loc=target_loc)
 
-    def create_pedestal(self, context, camera, target_loc, start_frame, end_frame, props):
+    def create_pedestal(self, context, camera, target_obj, target_loc, start_frame, end_frame, props):
         direction = Vector((0, 0, 1))
 
         if props.move_type == 'PEDESTAL_DOWN':
@@ -378,10 +353,12 @@ class QCM_OT_create_move(bpy.types.Operator):
         camera.location += direction * props.move_distance
         camera.keyframe_insert(data_path="location", frame=end_frame)
 
-        if props.keep_target_focus:
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
             add_track_constraint(camera, target_loc=target_loc)
 
-    def create_crane(self, context, camera, target_loc, start_frame, end_frame, props):
+    def create_crane(self, context, camera, target_obj, target_loc, start_frame, end_frame, props):
         offset = camera.location - target_loc
         radius = offset.length
 
@@ -405,7 +382,9 @@ class QCM_OT_create_move(bpy.types.Operator):
 
             camera.keyframe_insert(data_path="location", frame=frame)
 
-        if props.keep_target_focus:
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
             add_track_constraint(camera, target_loc=target_loc)
 
     def create_dolly_zoom(self, context, camera, target_loc, start_frame, end_frame, props):
@@ -415,7 +394,6 @@ class QCM_OT_create_move(bpy.types.Operator):
         initial_distance = (camera.location - target_loc).length
         initial_fov = cam_data.angle
 
-        # size = distance * tan(fov/2)
         apparent_size = initial_distance * math.tan(initial_fov / 2)
 
         direction = (target_loc - camera.location).normalized()
@@ -444,7 +422,7 @@ class QCM_OT_create_move(bpy.types.Operator):
 
         context.scene.frame_set(start_frame)
 
-    def create_arc_shot(self, context, camera, target_loc, start_frame, end_frame, props):
+    def create_arc_shot(self, context, camera, target_obj, target_loc, start_frame, end_frame, props):
         offset = camera.location - target_loc
         radius = offset.length
         start_angle = math.atan2(offset.y, offset.x)
@@ -472,12 +450,12 @@ class QCM_OT_create_move(bpy.types.Operator):
             camera.location.z = new_z
             camera.keyframe_insert(data_path="location", frame=frame)
 
-        if props.keep_target_focus:
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
             add_track_constraint(camera, target_loc=target_loc)
 
-    def create_whip_pan(self, context, camera, target_loc, start_frame, end_frame, props):
-        initial_rotation = camera.rotation_euler.copy()
-
+    def create_whip_pan(self, context, camera, start_frame, end_frame, props):
         context.scene.frame_set(start_frame)
         camera.keyframe_insert(data_path="rotation_euler", frame=start_frame)
 
@@ -493,7 +471,6 @@ class QCM_OT_create_move(bpy.types.Operator):
 
     def create_push_tilt(self, context, camera, target_loc, start_frame, end_frame, props):
         direction = (target_loc - camera.location).normalized()
-        initial_rotation = camera.rotation_euler.copy()
 
         context.scene.frame_set(start_frame)
         camera.keyframe_insert(data_path="location", frame=start_frame)
@@ -505,7 +482,7 @@ class QCM_OT_create_move(bpy.types.Operator):
         camera.keyframe_insert(data_path="location", frame=end_frame)
         camera.keyframe_insert(data_path="rotation_euler", frame=end_frame)
 
-    def create_turntable(self, context, camera, target_loc, start_frame, end_frame, props):
+    def create_turntable(self, context, camera, target_obj, target_loc, start_frame, end_frame, props):
         offset = camera.location - target_loc
         radius = Vector((offset.x, offset.y, 0)).length
         height = offset.z
@@ -527,10 +504,12 @@ class QCM_OT_create_move(bpy.types.Operator):
 
             camera.keyframe_insert(data_path="location", frame=frame)
 
-        if props.keep_target_focus:
+        if target_obj:
+            add_track_constraint(camera, target_obj=target_obj)
+        else:
             add_track_constraint(camera, target_loc=target_loc)
 
-    def create_flythrough(self, context, camera, target_loc, start_frame, end_frame, props):
+    def create_flythrough(self, context, camera, start_frame, end_frame, props):
         direction = camera.matrix_world.to_quaternion() @ Vector((0, 0, -1))
         direction.normalize()
 
@@ -602,7 +581,7 @@ class QCM_OT_create_move(bpy.types.Operator):
         else:
             curve = curves[0]
 
-        for c in camera.constraints:
+        for c in list(camera.constraints):
             if c.name == "QCM_FollowPath":
                 camera.constraints.remove(c)
 
@@ -618,17 +597,6 @@ class QCM_OT_create_move(bpy.types.Operator):
 
         constraint.offset = -100
         constraint.keyframe_insert(data_path="offset", frame=end_frame)
-
-    def create_rack_focus(self, context, camera, start_frame, end_frame, props):
-        cam_data = camera.data
-        cam_data.dof.use_dof = True
-
-        context.scene.frame_set(start_frame)
-        cam_data.dof.focus_distance = props.rack_focus_start
-        cam_data.dof.keyframe_insert(data_path="focus_distance", frame=start_frame)
-
-        cam_data.dof.focus_distance = props.rack_focus_end
-        cam_data.dof.keyframe_insert(data_path="focus_distance", frame=end_frame)
 
 
 class QCM_OT_clear_animation(bpy.types.Operator):
@@ -648,8 +616,10 @@ class QCM_OT_clear_animation(bpy.types.Operator):
         if camera.data.animation_data:
             camera.data.animation_data_clear()
 
-        for c in camera.constraints:
+        for c in list(camera.constraints):
             if c.name.startswith("QCM_"):
+                if c.type == 'FOLLOW_PATH' and c.animation_data:
+                    c.animation_data_clear()
                 camera.constraints.remove(c)
 
         remove_qcm_objects()
@@ -685,10 +655,9 @@ class QCM_PT_main_panel(bpy.types.Panel):
         else:
             box.label(text="Sem câmera ativa!", icon='ERROR')
 
-        if context.active_object and context.active_object != camera:
-            box.label(text=f"Target: {context.active_object.name}", icon='OBJECT_DATA')
-        else:
-            box.label(text="Target: 3D Cursor", icon='CURSOR')
+        layout.prop(props, "target_object", icon='OBJECT_DATA')
+        if not props.target_object:
+            layout.label(text="Usando 3D Cursor como target", icon='CURSOR')
 
         layout.separator()
 
@@ -724,18 +693,10 @@ class QCM_PT_main_panel(bpy.types.Panel):
             layout.prop(props, "shake_intensity")
             layout.prop(props, "shake_frequency")
 
-        if move == 'RACK_FOCUS':
-            layout.prop(props, "rack_focus_start")
-            layout.prop(props, "rack_focus_end")
-
         layout.separator()
 
-        if move not in ('ZOOM_IN', 'ZOOM_OUT', 'SHAKE', 'RACK_FOCUS', 'WHIP_PAN'):
+        if move not in ('ZOOM_IN', 'ZOOM_OUT', 'SHAKE', 'WHIP_PAN'):
             layout.prop(props, "use_easing")
-
-        if move not in ('ZOOM_IN', 'ZOOM_OUT', 'SHAKE', 'RACK_FOCUS',
-                        'WHIP_PAN', 'FLYTHROUGH', 'FOLLOW_PATH', 'DOLLY_ZOOM'):
-            layout.prop(props, "keep_target_focus")
 
         layout.separator()
 
